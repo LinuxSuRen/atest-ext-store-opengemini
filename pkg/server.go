@@ -26,6 +26,7 @@ import (
 	"github.com/linuxsuren/api-testing/pkg/server"
 	"github.com/linuxsuren/api-testing/pkg/testing/remote"
 	"github.com/linuxsuren/api-testing/pkg/version"
+	"github.com/openGemini/openGemini-cli/core"
 	"github.com/openGemini/opengemini-client-go/opengemini"
 )
 
@@ -42,7 +43,7 @@ func NewRemoteServer(defaultHistoryLimit int) (s remote.LoaderServer) {
 	return
 }
 
-func (s *dbserver) getClientWithDatabase(ctx context.Context, keySpace string) (dbQuery DataQuery, err error) {
+func (s *dbserver) getClientWithDatabase(ctx context.Context, database string) (dbQuery DataQuery, err error) {
 	store := remote.GetStoreFromContext(ctx)
 	if store == nil {
 		err = errors.New("no connect to database")
@@ -65,11 +66,20 @@ func (s *dbserver) getClientWithDatabase(ctx context.Context, keySpace string) (
 				},
 			},
 		}
+		cmdConfig := &core.CommandLineConfig{
+			Username: store.Username,
+			Password: store.Password,
+			Database: database,
+			Host:     host,
+			Port:     port,
+		}
 
 		var client opengemini.Client
 		client, err = opengemini.NewClient(config)
-		if err == nil {
-			dbQuery = NewCommonDataQuery(GetInnerSQL("opengemini"), client)
+		httpClient, httpClientErr := core.NewHttpClient(cmdConfig)
+		if err == nil && httpClientErr == nil {
+			httpClient.SetAuth(store.Username, store.Password)
+			dbQuery = NewCommonDataQuery(GetInnerSQL("opengemini"), client, httpClient)
 		}
 	}
 	return

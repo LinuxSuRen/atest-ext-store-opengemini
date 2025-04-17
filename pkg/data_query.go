@@ -20,9 +20,11 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/openGemini/openGemini-cli/core"
 	"github.com/openGemini/opengemini-client-go/opengemini"
 
 	"github.com/linuxsuren/api-testing/pkg/server"
@@ -90,11 +92,26 @@ func (s *dbserver) Query(ctx context.Context, query *server.DataQuery) (result *
 
 	var dataResult *server.DataQueryResult
 	now := time.Now()
+	defer func() {
+		result.Meta.Duration = time.Since(now).String()
+	}()
+
+	if strings.HasPrefix(query.Sql, "INSERT") || strings.HasPrefix(query.Sql, "insert") {
+		err = writeData(ctx, query.Key, query.Sql, dbQuery.GetHTTPClient())
+		return
+	}
+
 	if dataResult, err = sqlQuery(ctx, query.Key, query.Sql, db); err == nil {
 		result.Items = dataResult.Items
-		result.Meta.Duration = time.Since(now).String()
 	}
 	return
+}
+
+func writeData(ctx context.Context, database, sql string, client core.HttpClient) error {
+	fmt.Println("start to write", sql, "database", database)
+	sql = strings.TrimPrefix(sql, "INSERT")
+	sql = strings.TrimPrefix(sql, "insert")
+	return client.Write(ctx, database, "", sql, "")
 }
 
 func sqlQuery(_ context.Context, database, sql string, client opengemini.Client) (result *server.DataQueryResult, err error) {
@@ -125,18 +142,17 @@ func sqlQuery(_ context.Context, database, sql string, client opengemini.Client)
 				continue
 			}
 
-			for _, col := range rs.Columns {
-				for _, v := range rs.Values {
-					data := make([]*server.Pair, 0)
+			for _, v := range rs.Values {
+				data := make([]*server.Pair, 0)
+				for i, vv := range v {
 					data = append(data, &server.Pair{
-						Key:   col,
-						Value: fmt.Sprintf("%v", v),
-					})
-					fmt.Println(col, v, "=====")
-					result.Items = append(result.Items, &server.Pairs{
-						Data: data,
+						Key:   rs.Columns[i],
+						Value: fmt.Sprintf("%v", vv),
 					})
 				}
+				result.Items = append(result.Items, &server.Pairs{
+					Data: data,
+				})
 			}
 		}
 	}
@@ -151,20 +167,23 @@ type DataQuery interface {
 	GetCurrentDatabase() (string, error)
 	GetLabels(context.Context, string) []*server.Pair
 	GetClient() opengemini.Client
+	GetHTTPClient() core.HttpClient
 	GetInnerSQL() InnerSQL
 }
 
 type commonDataQuery struct {
-	client   opengemini.Client
-	innerSQL InnerSQL
+	client     opengemini.Client
+	httpClient core.HttpClient
+	innerSQL   InnerSQL
 }
 
 var _ DataQuery = &commonDataQuery{}
 
-func NewCommonDataQuery(innerSQL InnerSQL, client opengemini.Client) DataQuery {
+func NewCommonDataQuery(innerSQL InnerSQL, client opengemini.Client, httpClient core.HttpClient) DataQuery {
 	return &commonDataQuery{
-		innerSQL: innerSQL,
-		client:   client,
+		innerSQL:   innerSQL,
+		client:     client,
+		httpClient: httpClient,
 	}
 }
 
@@ -195,6 +214,10 @@ func (q *commonDataQuery) GetLabels(ctx context.Context, sql string) (metadata [
 
 func (q *commonDataQuery) GetClient() opengemini.Client {
 	return q.client
+}
+
+func (q *commonDataQuery) GetHTTPClient() core.HttpClient {
+	return q.httpClient
 }
 
 func (q *commonDataQuery) GetInnerSQL() InnerSQL {
