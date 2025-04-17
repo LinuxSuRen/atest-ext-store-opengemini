@@ -96,7 +96,8 @@ func (s *dbserver) Query(ctx context.Context, query *server.DataQuery) (result *
 		result.Meta.Duration = time.Since(now).String()
 	}()
 
-	if strings.HasPrefix(query.Sql, "INSERT") || strings.HasPrefix(query.Sql, "insert") {
+	if strings.HasPrefix(query.Sql, "INSERT") || strings.HasPrefix(query.Sql, "insert") ||
+		strings.HasPrefix("write", strings.ToLower(query.Sql)) {
 		err = writeData(ctx, query.Key, query.Sql, dbQuery.GetHTTPClient())
 		return
 	}
@@ -195,7 +196,7 @@ func (q *commonDataQuery) GetDatabases(ctx context.Context) (databases []string,
 
 func (q *commonDataQuery) GetTables(ctx context.Context, currentDatabase string) (tables []string, err error) {
 	tables, err = q.client.ShowMeasurements(opengemini.NewMeasurementBuilder().Database(currentDatabase).Show())
-	fmt.Println(tables, err, currentDatabase)
+	sort.Strings(tables)
 	return
 }
 
